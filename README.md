@@ -1,262 +1,68 @@
-# Handwritten OCR System
 
-Local-only, edge-deployable OCR system for recognizing mixed handwritten English text and mathematical expressions (LaTeX) from images.
+# Handwritten OCR System (Text & Math)
 
-## Features
+A local, privacy-focused OCR system fine-tuned for:
+1.  **Handwritten English** (Scientific/Academic domain).
+2.  **Mathematical Expressions** (LaTeX output).
 
-- **Modular Pipeline**: Segmentation → Classification → OCR → Reconstruction
-- **Dual Recognition**: Separate models for text (TrOCR) and math (MFR)
-- **Layout Detection**: YOLOv8-Nano for detecting text lines and math formulas
-- **ONNX Runtime**: INT8 quantized models for fast CPU inference
-- **Confidence Routing**: Automatic rerouting based on prediction confidence
-- **Markdown + LaTeX Output**: Clean, renderable document output
+Built with **TrOCR** (Vision Encoder-Decoder) and **YOLOv8** (Layout Detection).
 
-## Requirements
+---
 
-- Python 3.9+
-- PyTorch 2.1+
-- ONNX Runtime 1.17+
+## 🚀 Quick Start
 
-## Installation
-
+### 1. Installation
 ```bash
-# Clone the repository
-cd "OCR PROJECT"
-
-# Create virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or: venv\Scripts\activate  # Windows
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-```
-
-## Dataset Preparation
-
-### IAM Handwriting Database
-Once you have downloaded the IAM dataset (lines and xml):
-
-```bash
-python data/scripts/process_iam.py --iam-dir data/raw/IAM
-```
-
-### Google MathWriting
-Once you have downloaded the MathWriting dataset:
-
-```bash
-python data/scripts/process_mathwriting.py --input-dir data/raw/MathWriting
-```
-
-## Quick Start
-
-### 1. Generate Sample Data
-
-```bash
-# Generate synthetic training data
-python data/synthesis_script.py --num-samples 1000
-
-# Generate a sample page for testing
-python data/synthesis_script.py --generate-page
-```
-
-### 2. Adapt Tokenizer (Optional)
-
-```bash
-python training/tokenizer_utils.py --output models/trocr_text/tokenizer
-```
-
-### 3. Train Models
-
-#### Text OCR (TrOCR)
-
-```bash
-python training/train_trocr_text.py \
-  --manifest data/manifests/train.jsonl \
-  --val-manifest data/manifests/val.jsonl \
-  --epochs 10 \
-  --batch_size 8 \
-  --lr 5e-5 \
-  --output checkpoints/trocr_text \
-  --adapt-tokenizer
-```
-
-#### Math OCR (MFR)
-
-```bash
-python training/train_mfr_math.py \
-  --manifest data/manifests/train.jsonl \
-  --val-manifest data/manifests/val.jsonl \
-  --epochs 8 \
-  --batch_size 4 \
-  --output checkpoints/trocr_math \
-  --adapt-latex
-```
-
-#### Layout Detection (YOLOv8)
-
-```bash
-# Generate layout training data
-python training/train_yolo.py --action generate --data-dir data/yolo_layout
-
-# Train YOLO
-python training/train_yolo.py --action train --data-dir data/yolo_layout --epochs 50
-
-# Export to ONNX
-python training/train_yolo.py --action export --export-path models/yolo/yolov8n-layout.onnx
-```
-
-### 4. Export to ONNX
-
-```bash
-# Text OCR
-optimum-cli export onnx \
-  --model checkpoints/trocr_text/final \
-  --task image-to-text-with-past \
-  models/trocr_text/
-
-# Math OCR
-optimum-cli export onnx \
-  --model checkpoints/trocr_math/final \
-  --task image-to-text-with-past \
-  models/trocr_math/
-```
-
-### 5. Run Inference
-
-```bash
-# Process a single image
-python inference/pipeline.py \
-  --image samples/page.png \
-  --output outputs/demo_result.md \
-  --debug
-```
-
-### 6. Run Streamlit Demo
-
+### 2. Run the Demo App
 ```bash
 streamlit run app/app.py
 ```
+Upload an image to see detection types (Text vs Math) and OCR results.
 
-## Project Structure
-
-```
-project_root/
-├── data/
-│   ├── raw/                  # IAM, MathWriting, IBEM datasets
-│   ├── synthetic/            # Generated synthetic data
-│   ├── manifests/            # JSONL data manifests
-│   │   ├── train.jsonl
-│   │   ├── val.jsonl
-│   │   └── test.jsonl
-│   └── synthesis_script.py   # Data generation script
-├── models/
-│   ├── yolo/
-│   │   └── yolov8n-layout.onnx
-│   ├── trocr_text/
-│   │   ├── encoder_model.onnx
-│   │   ├── decoder_model.onnx
-│   │   └── tokenizer/
-│   └── trocr_math/
-│       ├── encoder_model.onnx
-│       ├── decoder_model.onnx
-│       └── tokenizer/
-├── training/
-│   ├── train_trocr_text.py   # Text OCR training
-│   ├── train_mfr_math.py     # Math OCR training
-│   ├── train_yolo.py         # Layout model training
-│   └── tokenizer_utils.py    # Tokenizer adaptation
-├── inference/
-│   ├── preprocess.py         # Image preprocessing
-│   ├── layout.py             # Layout detection
-│   ├── ocr_text.py           # Text recognition
-│   ├── ocr_math.py           # Math recognition
-│   ├── reconstruct.py        # Document reconstruction
-│   └── pipeline.py           # Full inference pipeline
-├── evaluation/
-│   ├── compute_cer.py        # Character Error Rate
-│   ├── compute_token_distance.py  # Token Edit Distance
-│   └── compare_checkpoints.py     # Checkpoint comparison
-├── app/
-│   └── app.py                # Streamlit demo
-├── outputs/                  # Generated outputs
-├── samples/                  # Sample images
-├── requirements.txt
-└── README.md
-```
-
-## Evaluation
-
-### Text OCR (CER/WER)
-
+### 3. Inference from Command Line
 ```bash
-python evaluation/compute_cer.py \
-  --manifest data/manifests/test.jsonl \
-  --model-dir models/trocr_text
+python3 inference/pipeline.py --image path/to/image.png --output result.md
 ```
 
-### Math OCR (Token Edit Distance)
+---
 
+## 🛠 Project Structure
+
+### Data & Training
+- `data/scripts/`: Ingestion scripts for IAM, MathWriting, and Custom datasets.
+- `training/`: Training scripts.
+  - `train_trocr_text.py`: Fine-tune TrOCR (supports `--augment`).
+  - `train_math_model.py`: Script for Math OCR (HF Streaming).
+
+### Optimization (Accuracy Recovery)
+We use a high-precision pipeline to eliminate "dot -> 0" errors:
+1.  **Preprocessing**: `data/scripts/preprocess_lines.py` removes underlines and boosts dots.
+2.  **Verification**: `evaluation/verify_accuracy.py` audits "Zero Hallucination Rate".
+3.  **Metrics**: `evaluation/advanced_metrics.py` tracks lexical drift.
+
+---
+
+## 🧠 Models
+
+| Type | Model Base | Status |
+| :--- | :--- | :--- |
+| **Text** | `microsoft/trocr-small-handwritten` | Fine-Tuning (Phase 2) |
+| **Math** | `microsoft/trocr-base-printed` | Planned |
+| **Layout** | `ultralytics/yolov8n` | Detection Ready |
+
+---
+
+## 🧪 Evaluation
+
+To verify the model against specific failure modes (halucinated zeros):
 ```bash
-python evaluation/compute_token_distance.py \
-  --manifest data/manifests/test.jsonl \
-  --model-dir models/trocr_math
+python3 evaluation/verify_accuracy.py --model_path checkpoints/trocr_text_accuracy_small/epoch_1
 ```
 
-### Compare Checkpoints
+---
 
-```bash
-python evaluation/compare_checkpoints.py \
-  --checkpoint-dir checkpoints/trocr_text \
-  --manifest data/manifests/val.jsonl \
-  --model-type text
-```
-
-## Performance Targets
-
-| Metric | Target | Device |
-|--------|--------|--------|
-| Per-line inference | <1s | CPU (Intel i5/i7) |
-| Per-line inference | <200ms | GPU (CUDA) |
-| Full page (10-15 lines) | 5-10s | CPU |
-| Model size (ONNX INT8) | <100MB | - |
-
-## API Usage
-
-```python
-from inference.pipeline import OCRPipeline, PipelineConfig
-
-# Initialize pipeline
-config = PipelineConfig(device="cpu")
-pipeline = OCRPipeline(config)
-
-# Process image
-result = pipeline.process("path/to/image.png")
-
-# Access results
-print(result.markdown)
-print(f"Processing time: {result.total_time:.2f}s")
-print(f"Detected: {result.num_text_regions} text, {result.num_math_regions} math")
-```
-
-## Manifest Format
-
-JSONL format for training data:
-
-```json
-{"image_path": "data/synthetic/img_000123.png", "ground_truth_text": "Calculate the integral $\\int x^2 dx$", "mode": "mixed"}
-```
-
-Modes: `text`, `math`, `mixed`
-
-## Known Limitations
-
-- Requires horizontal text (rotation >15° may affect accuracy)
-- Best results with high-quality scans (300+ DPI)
-- Complex multi-line equations may require manual correction
-
-## License
-
-MIT License
+## 📝 License
+MIT License. Local Use Only.

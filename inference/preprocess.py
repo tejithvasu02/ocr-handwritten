@@ -334,3 +334,90 @@ def crop_region(
     y2 = min(h, y2 + padding)
     
     return image[y1:y2, x1:x2]
+
+
+def remove_underlines(image: np.ndarray) -> np.ndarray:
+    """
+    Remove horizontal lines from image (grayscale or RGB).
+    """
+    # Convert to grayscale for processing
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        is_color = True
+    else:
+        gray = image
+        is_color = False
+        
+    h, w = gray.shape
+    # Line needs to be at least 20% of width
+    line_min_width = int(w * 0.2)
+    if line_min_width < 20: line_min_width = 20
+    
+    # Invert for morphological operations
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (line_min_width, 1))
+    detected_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
+    
+    # Mask out top half to protect characters
+    mask = np.zeros_like(detected_lines)
+    mask[int(h*0.4):, :] = 255 
+    detected_lines = cv2.bitwise_and(detected_lines, mask)
+    
+    # Dilation to cover artifacts
+    dilated_lines = cv2.dilate(detected_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 3)), iterations=1)
+    
+    # Inpaint
+    if is_color:
+        inpainted = cv2.inpaint(image, dilated_lines, 3, cv2.INPAINT_TELEA)
+    else:
+        inpainted = cv2.inpaint(gray, dilated_lines, 3, cv2.INPAINT_TELEA)
+        
+    return inpainted
+
+
+def boost_dots(image: np.ndarray) -> np.ndarray:
+    """
+    Boost small dots in image.
+    """
+    # Convert to grayscale for processing
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        is_color = True
+    else:
+        gray = image
+        is_color = False
+        
+    # Invert
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    
+    # Connected Components
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    
+    output_mask = np.zeros_like(binary)
+    has_dots = False
+    
+    for i in range(1, num_labels):
+        area = stats[i, cv2.CC_STAT_AREA]
+        # Heuristic for "dot"
+        if 5 <= area <= 60:
+            output_mask[labels == i] = 255
+            has_dots = True
+            
+    if not has_dots:
+        return image
+        
+    # Dilate the dots
+    kernel = np.ones((2,2), np.uint8)
+    dilated_dots = cv2.dilate(output_mask, kernel, iterations=1)
+    
+    # Apply to image (burn consistent black)
+    result = image.copy()
+    
+    if is_color:
+        # Set all channels to 0 where dilated dots are
+        result[dilated_dots == 255] = [0, 0, 0] # Black
+    else:
+        result[dilated_dots == 255] = 0
+    
+    return result

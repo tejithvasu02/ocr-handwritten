@@ -30,6 +30,7 @@ class TextOCR:
         encoder_path: str = "models/trocr_text/encoder_model.onnx",
         decoder_path: str = "models/trocr_text/decoder_model.onnx",
         tokenizer_path: str = "models/trocr_text/tokenizer",
+        model_path: Optional[str] = None,
         device: str = "cpu",
         max_new_tokens: int = 100,
         num_beams: int = 4,
@@ -43,6 +44,7 @@ class TextOCR:
             encoder_path: Path to encoder ONNX model
             decoder_path: Path to decoder ONNX model
             tokenizer_path: Path to tokenizer directory
+            model_path: Path to PyTorch model (if fallback used)
             device: 'cpu' or 'cuda'
             max_new_tokens: Maximum tokens to generate
             num_beams: Beam search width
@@ -53,6 +55,7 @@ class TextOCR:
         self.num_beams = num_beams
         self.timeout = timeout
         self.confidence_threshold = confidence_threshold
+        self.model_path = model_path
         
         self.torch_model = None
         
@@ -96,9 +99,11 @@ class TextOCR:
             from transformers import VisionEncoderDecoderModel
             import torch
             
-            self.torch_model = VisionEncoderDecoderModel.from_pretrained(
-                "microsoft/trocr-small-handwritten"
-            )
+            # Use custom path or default
+            path = self.model_path if self.model_path else "microsoft/trocr-small-handwritten"
+            print(f"Loading PyTorch model from: {path}")
+            
+            self.torch_model = VisionEncoderDecoderModel.from_pretrained(path)
             self.torch_model.eval()
             self.device = "cpu"
             
@@ -325,5 +330,6 @@ def create_text_ocr(
         encoder_path=os.path.join(model_dir, "encoder_model.onnx"),
         decoder_path=os.path.join(model_dir, "decoder_model.onnx"),
         tokenizer_path=os.path.join(model_dir, "tokenizer"),
+        model_path=model_dir,  # Use model_dir as checkpoint path for fallback
         device=device
     )

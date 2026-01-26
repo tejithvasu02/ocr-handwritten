@@ -1,7 +1,3 @@
-"""
-TrOCR Text Fine-Tuning Script for Handwritten English Recognition.
-Uses microsoft/trocr-small-handwritten with LaTeX-adapted tokenizer.
-"""
 
 import os
 import sys
@@ -15,6 +11,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 from tqdm import tqdm
+import albumentations as A
+import cv2
 
 from transformers import (
     TrOCRProcessor,
@@ -37,6 +35,18 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(SEED)
 
 
+# Augmentation utilities
+def add_random_lines(image, **kwargs):
+    img = image.copy()
+    h, w = img.shape[:2]
+    # Draw lines in bottom half
+    y = random.randint(int(h*0.6), h-1)
+    color = (random.randint(0, 100), random.randint(0, 100), random.randint(0, 100)) # Dark line
+    thickness = random.randint(1, 3)
+    cv2.line(img, (0, y), (w, y), color, thickness)
+    return img
+
+
 class OCRDataset(Dataset):
     """Dataset for OCR training from JSONL manifest."""
     
@@ -45,11 +55,27 @@ class OCRDataset(Dataset):
         manifest_path: str,
         processor: TrOCRProcessor,
         max_target_length: int = 128,
-        mode_filter: Optional[str] = None
+        mode_filter: Optional[str] = None,
+        augment: bool = False
     ):
         self.processor = processor
         self.max_target_length = max_target_length
+        self.augment = augment
         self.samples = []
+        
+        # Define augmentations
+        self.transform = A.Compose([
+            A.Lambda(name="add_lines", image=add_random_lines, p=0.3), # 30% chance of underline
+            A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.05, rotate_limit=3, p=0.5, border_mode=0, value=(255, 255, 255)),
+            A.GaussianBlur(blur_limit=(3, 5), p=0.3),
+            A.GaussNoise(var_limit=(10.0, 50.0), p=0.3),
+            A.RandomBrightnessContrast(p=0.4),
+            A.OneOf([
+                A.MotionBlur(p=0.2),
+                A.MedianBlur(blur_limit=3, p=0.1),
+                A.Blur(blur_limit=3, p=0.1),
+            ], p=0.2),
+        ])
         
         with open(manifest_path, 'r') as f:
             for line in f:
@@ -57,7 +83,7 @@ class OCRDataset(Dataset):
                 if mode_filter is None or sample.get('mode') == mode_filter:
                     self.samples.append(sample)
         
-        print(f"Loaded {len(self.samples)} samples from {manifest_path}")
+        print(f"Loaded {len(self.samples)} samples from {manifest_path} (Augment={augment})")
     
     def __len__(self):
         return len(self.samples)
@@ -67,6 +93,13 @@ class OCRDataset(Dataset):
         
         # Load and process image
         image = Image.open(sample['image_path']).convert('RGB')
+        
+        if self.augment:
+            # Albumentations expects numpy array
+            image_np = np.array(image)
+            augmented = self.transform(image=image_np)["image"]
+            image = Image.fromarray(augmented)
+            
         pixel_values = self.processor(images=image, return_tensors="pt").pixel_values.squeeze(0)
         
         # Process text
@@ -88,18 +121,21 @@ class OCRDataset(Dataset):
         }
 
 
-def train_epoch(model, dataloader, optimizer, scheduler, device, epoch):
+def train_epoch(model, dataloader, optimizer, scheduler, device, epoch, save_steps=0, output_dir=""):
     """Train for one epoch."""
     model.train()
     total_loss = 0
     
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
-    for batch in progress_bar:
+    for i, batch in enumerate(progress_bar):
         pixel_values = batch["pixel_values"].to(device)
         labels = batch["labels"].to(device)
         
         outputs = model(pixel_values=pixel_values, labels=labels)
         loss = outputs.loss
+        
+        # Handle gradient accumulation manually if batch size > 1
+        # But here we just step
         
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -110,6 +146,19 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, epoch):
         
         total_loss += loss.item()
         progress_bar.set_postfix({"loss": f"{loss.item():.4f}"})
+        
+        # Save checkoint
+        if save_steps > 0 and (i + 1) % save_steps == 0:
+            ckpt_path = os.path.join(output_dir, f"checkpoint-epoch{epoch}-step{i+1}")
+            # Save properly (model.module if data parallel?)
+            # Just verify keys
+            if hasattr(model, "module"):
+                model.module.save_pretrained(ckpt_path)
+            else:
+                model.save_pretrained(ckpt_path)
+            # Tokenizer is loaded in main, maybe save it too? 
+            # Skipping tokenizer save for intermediate, just model is enough.
+            print(f" [Saved {ckpt_path}]", end="")
     
     return total_loss / len(dataloader)
 
@@ -145,6 +194,8 @@ def main():
     parser.add_argument("--mode-filter", type=str, default="text", help="Filter samples by mode")
     parser.add_argument("--max-target-length", type=int, default=128)
     parser.add_argument("--gradient-accumulation", type=int, default=1)
+    parser.add_argument("--augment", action="store_true", help="Enable data augmentation")
+    parser.add_argument("--save-steps", type=int, default=0, help="Save checkpoint every X steps")
     
     args = parser.parse_args()
     
@@ -190,7 +241,8 @@ def main():
         args.manifest,
         processor,
         max_target_length=args.max_target_length,
-        mode_filter=args.mode_filter if args.mode_filter != "all" else None
+        mode_filter=args.mode_filter if args.mode_filter != "all" else None,
+        augment=args.augment
     )
     
     train_loader = DataLoader(
@@ -207,7 +259,8 @@ def main():
             args.val_manifest,
             processor,
             max_target_length=args.max_target_length,
-            mode_filter=args.mode_filter if args.mode_filter != "all" else None
+            mode_filter=args.mode_filter if args.mode_filter != "all" else None,
+            augment=False
         )
         val_loader = DataLoader(
             val_dataset,
@@ -235,7 +288,7 @@ def main():
     best_val_loss = float('inf')
     
     for epoch in range(1, args.epochs + 1):
-        train_loss = train_epoch(model, train_loader, optimizer, scheduler, device, epoch)
+        train_loss = train_epoch(model, train_loader, optimizer, scheduler, device, epoch, save_steps=args.save_steps, output_dir=args.output)
         print(f"Epoch {epoch} - Train Loss: {train_loss:.4f}")
         
         # Validation

@@ -30,10 +30,14 @@ st.set_page_config(
 
 
 @st.cache_resource
-def load_pipeline(device: str = "cpu") -> OCRPipeline:
+def load_pipeline(device: str = "cpu", text_model_dir: str = "models/trocr_text", math_model_dir: str = "models/trocr_math") -> OCRPipeline:
     """Load OCR pipeline (cached)."""
+    # Create hash for caching different models
+    # Actually streamlit caches based on arguments.
     config = PipelineConfig(
         device=device,
+        text_model_dir=text_model_dir,
+        math_model_dir=math_model_dir,
         debug_output=True,
         save_debug_images=True
     )
@@ -50,6 +54,61 @@ def main():
     # Sidebar configuration
     st.sidebar.header("⚙️ Configuration")
     
+    # Model Selection
+    st.sidebar.subheader("🧠 Models")
+    
+    # Text Model
+    text_model_source = st.sidebar.radio(
+        "Text Model Source",
+        ["Default (Base)", "Fine-Tuned Checkpoint"],
+        help="Choose between base model or your trained checkpoints"
+    )
+    
+    text_model_dir = "models/trocr_text"
+    if text_model_source == "Fine-Tuned Checkpoint":
+        # Scan checkpoints
+        import glob
+        checkpoints = sorted(glob.glob("checkpoints/trocr_text_combined/*"))
+        checkpoints = [d for d in checkpoints if os.path.isdir(d)]
+        
+        if not checkpoints:
+            st.sidebar.warning("No checkpoints found in checkpoints/trocr_text_combined")
+            text_model_source = "Default (Base)"
+        else:
+            selected_ckpt = st.sidebar.selectbox(
+                "Select Checkpoint",
+                [os.path.basename(c) for c in checkpoints],
+                index=len(checkpoints)-1 # Default to latest
+            )
+            text_model_dir = os.path.join("checkpoints/trocr_text_combined", selected_ckpt)
+            st.sidebar.info(f"Using: {selected_ckpt}")
+            
+    # Math Model
+    math_model_source = st.sidebar.radio(
+        "Math Model Source",
+        ["Default (Base Printed)", "Fine-Tuned (Math)"],
+        index=0
+    )
+    
+    math_model_dir = "models/trocr_math"
+    if math_model_source == "Fine-Tuned (Math)":
+         # Scan checkpoints
+        import glob
+        checkpoints_math = sorted(glob.glob("checkpoints/trocr_math/*"))
+        checkpoints_math = [d for d in checkpoints_math if os.path.isdir(d)]
+        
+        if not checkpoints_math:
+            st.sidebar.warning("No checkpoints found in checkpoints/trocr_math")
+        else:
+            selected_ckpt_math = st.sidebar.selectbox(
+                "Select Math Checkpoint",
+                [os.path.basename(c) for c in checkpoints_math],
+                index=len(checkpoints_math)-1
+            )
+            math_model_dir = os.path.join("checkpoints/trocr_math", selected_ckpt_math)
+
+    st.sidebar.divider()
+
     device = st.sidebar.selectbox(
         "Compute Device",
         ["cpu", "cuda"],
@@ -120,7 +179,7 @@ def main():
                 
                 try:
                     # Load pipeline
-                    pipeline = load_pipeline(device)
+                    pipeline = load_pipeline(device, text_model_dir, math_model_dir)
                     
                     # Update config
                     pipeline.config.confidence_threshold = confidence_threshold

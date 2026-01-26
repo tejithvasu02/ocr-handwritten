@@ -20,7 +20,9 @@ from inference.preprocess import (
     preprocess_for_layout,
     preprocess_for_ocr,
     crop_region,
-    deskew_image
+    deskew_image,
+    remove_underlines,
+    boost_dots
 )
 from inference.layout import (
     LayoutDetector,
@@ -204,6 +206,15 @@ class OCRPipeline:
             
             # Convert BGR to RGB for OCR
             region_rgb = cv2.cvtColor(region, cv2.COLOR_BGR2RGB)
+            
+            # Apply Cleaning (Accuracy Phase)
+            # Only for Text regions really, but harmless for Math?
+            # Math might have fraction bars which are horizontal lines. DANGER.
+            # Only apply if class is text_line.
+            
+            if det.class_name == "text_line":
+                region_rgb = remove_underlines(region_rgb)
+                region_rgb = boost_dots(region_rgb)
             
             # Route based on class
             if det.class_name == "text_line":
